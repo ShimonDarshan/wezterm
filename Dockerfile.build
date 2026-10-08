@@ -1,0 +1,54 @@
+# Builds wezterm from the LOCAL source tree (so your customizations are included)
+# and exports only the release binaries.
+#
+# Usage (from the repo root):
+#   DOCKER_BUILDKIT=1 docker build -f Dockerfile.build --output type=local,dest=./dist .
+#
+# Result: ./dist/wezterm, ./dist/wezterm-gui, ./dist/wezterm-mux-server,
+#         ./dist/strip-ansi-escapes
+#
+# The base image matches the host (Ubuntu 24.04) so the binaries link against
+# the same glibc / system libraries you have installed.
+
+ARG UBUNTU_VERSION=24.04
+
+FROM ubuntu:${UBUNTU_VERSION} AS build
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    CARGO_HOME=/usr/local/cargo \
+    RUSTUP_HOME=/usr/local/rustup \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl git build-essential pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain stable
+
+WORKDIR /src
+
+# Install system deps first, using only the get-deps script, so this layer
+# stays cached when you edit source code.
+COPY get-deps ./get-deps
+COPY ci/check-rust-version.sh ./ci/check-rust-version.sh
+RUN apt-get update && ./get-deps && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+# Cache mounts keep the cargo registry and build artifacts between builds,
+# making incremental rebuilds after code changes much faster.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release \
+        -p wezterm -p wezterm-gui -p wezterm-mux-server -p strip-ansi-escapes \
+    && mkdir -p /out \
+    && cp target/release/wezterm \
+          target/release/wezterm-gui \
+          target/release/wezterm-mux-server \
+          target/release/strip-ansi-escapes \
+          /out/ \
+    && strip /out/*
+
+FROM scratch AS export
+COPY --from=build /out/ /

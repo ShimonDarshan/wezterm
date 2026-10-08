@@ -1,4 +1,4 @@
-.PHONY: all fmt build check test docs servedocs
+.PHONY: all fmt build check test docs servedocs docker-build
 
 all: build
 
@@ -27,3 +27,7 @@ docs:
 
 servedocs:
 	ci/build-docs.sh serve
+
+# Build release binaries inside Docker (see Dockerfile.build); output goes to ./dist
+docker-build:
+	DOCKER_BUILDKIT=1 docker build -f Dockerfile.build --output type=local,dest=./dist .
